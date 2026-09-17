@@ -4,34 +4,57 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 
-const cryptoPath = path.resolve(
+const networkPath = path.resolve(
     process.env.HOME, 'hyperledger', 'fabric-samples',
-    'test-network', 'organizations', 'peerOrganizations',
-    'org1.example.com'
+    'test-network', 'organizations', 'peerOrganizations'
 )
 
-const keyPath = path.join(cryptoPath, 'users', 'User1@org1.example.com', 'msp', 'keystore')
-const certPath = path.join(cryptoPath, 'users', 'User1@org1.example.com', 'msp', 'signcerts', 'cert.pem')
-const tlsCertPath = path.join(cryptoPath, 'peers', 'peer0.org1.example.com', 'tls', 'ca.crt')
+async function getContract(org = 'org1') {
+    const orgConfig = {
+        org1: {
+            mspId: 'Org1MSP',
+            certPath: path.join(networkPath, 'org1.example.com', 'users', 'User1@org1.example.com', 'msp', 'signcerts', 'cert.pem'),
+            keyPath: path.join(networkPath, 'org1.example.com', 'users', 'User1@org1.example.com', 'msp', 'keystore'),
+            tlsCertPath: path.join(networkPath, 'org1.example.com', 'peers', 'peer0.org1.example.com', 'tls', 'ca.crt'),
+            peerEndpoint: 'localhost:7051',
+            peerHostAlias: 'peer0.org1.example.com'
+        },
+        org2: {
+            mspId: 'Org2MSP',
+            certPath: path.join(networkPath, 'org2.example.com', 'users', 'User1@org2.example.com', 'msp', 'signcerts', 'cert.pem'),
+            keyPath: path.join(networkPath, 'org2.example.com', 'users', 'User1@org2.example.com', 'msp', 'keystore'),
+            tlsCertPath: path.join(networkPath, 'org2.example.com', 'peers', 'peer0.org2.example.com', 'tls', 'ca.crt'),
+            peerEndpoint: 'localhost:9051',
+            peerHostAlias: 'peer0.org2.example.com'
+        },
+        org3: {
+            mspId: 'Org3MSP',
+            certPath: path.join(networkPath, 'org3.example.com', 'users', 'User1@org3.example.com', 'msp', 'signcerts', 'cert.pem'),
+            keyPath: path.join(networkPath, 'org3.example.com', 'users', 'User1@org3.example.com', 'msp', 'keystore'),
+            tlsCertPath: path.join(networkPath, 'org3.example.com', 'peers', 'peer0.org3.example.com', 'tls', 'ca.crt'),
+            peerEndpoint: 'localhost:11051',
+            peerHostAlias: 'peer0.org3.example.com'
+        }
+    }
 
-async function getContract() {
-    const tlsCredentials = grpc.credentials.createSsl(fs.readFileSync(tlsCertPath))
+    const config = orgConfig[org]
+    const tlsCredentials = grpc.credentials.createSsl(fs.readFileSync(config.tlsCertPath))
 
     const client = new grpc.Client(
-        process.env.PEER_ENDPOINT,
+        config.peerEndpoint,
         tlsCredentials,
-        { 'grpc.ssl_target_name_override': process.env.PEER_HOST_ALIAS }
+        { 'grpc.ssl_target_name_override': config.peerHostAlias }
     )
 
-    const privateKeyFiles = fs.readdirSync(keyPath)
+    const privateKeyFiles = fs.readdirSync(config.keyPath)
     const privateKey = crypto.createPrivateKey(
-        fs.readFileSync(path.join(keyPath, privateKeyFiles[0]))
+        fs.readFileSync(path.join(config.keyPath, privateKeyFiles[0]))
     )
-    const certificate = fs.readFileSync(certPath)
+    const certificate = fs.readFileSync(config.certPath)
 
     const gateway = connect({
         client,
-        identity: { mspId: process.env.MSP_ID, credentials: certificate },
+        identity: { mspId: config.mspId, credentials: certificate },
         signer: signers.newPrivateKeySigner(privateKey),
     })
 

@@ -29,14 +29,15 @@ type Customer struct{
 	RegisteredAt string `json:"registeredAt"`
 }
 type Claim struct{
-    ClaimID string `json:"claimID"`
-    PolicyID string `json:"policyId"`
-    CustomerID string `json:"customerID"`
-    Reason string `json:"reason"`
-    ClaimAmount string `json:"claimAmount"`
-    Status string `json:"status"`  
+    ClaimID      string `json:"claimID"`
+    PolicyID     string `json:"policyId"`
+    CustomerID   string `json:"customerID"`
+    Reason       string `json:"reason"`
+    ClaimAmount  string `json:"claimAmount"`
+    Status       string `json:"status"`
     PayoutAmount string `json:"payoutAmount"`
-    FiledAt string `json:"filedAt"`
+    FiledAt      string `json:"filedAt"`
+    AssessedAt   string `json:"assessedAt"`
 }
 func (s *SmartContract) RegisterCustomer(ctx contractapi.TransactionContextInterface, customerID string, fullName string, contact string, address string, income string, identityProof string) error {
 existingData, err := ctx.GetStub().GetState(customerID)
@@ -157,7 +158,7 @@ func (s *SmartContract) GetPolicy(ctx contractapi.TransactionContextInterface, c
         return "",fmt.Errorf("failed to read from ledger%v",err)
     }
     if policyData == nil {
-    return "", fmt.Errorf("policy not found")  // ✅
+    return "", fmt.Errorf("policy not found")  // 
 }
     return string(policyData),nil
 }
@@ -227,6 +228,40 @@ func (s *SmartContract) ProcessPayout(ctx contractapi.TransactionContextInterfac
         return fmt.Errorf("failed to save claim:%v",err)
     }
     return nil
+}
+func  (s *SmartContract) AssessClaim(ctx contractapi.TransactionContextInterface,claimID string,decision string) error{
+    claimData,err := ctx.GetStub().GetState(claimID)
+    if err != nil{
+        return fmt.Errorf("failed to read from ledger%v",err)
+    }
+   if claimData == nil {
+    return fmt.Errorf("claim not found")       //
+}
+  var claim Claim
+  err = json.Unmarshal(claimData,&claim)
+  if err!= nil{
+    return fmt.Errorf("failed to Unmarshal claim:%v",err)
+  }
+  if claim.Status != "PENDING"{
+    return fmt.Errorf("claim already assessed")
+  }
+  claim.Status = decision
+
+  txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+if err != nil {
+    return fmt.Errorf("failed to get timestamp: %v", err)
+}
+  claim.AssessedAt = time.Unix(txTimestamp.Seconds, int64(txTimestamp.Nanos)).UTC().Format("2006-01-02 15:04:05")
+  
+   bytes,err := json.Marshal(claim)
+    if err != nil{
+        return fmt.Errorf("failed to marshal customer:%v",err)
+    }
+    err = ctx.GetStub().PutState(claimID,bytes)
+     if err != nil{
+        return fmt.Errorf("failed to save policy:%v",err)
+     }
+     return nil
 }
 func main() {
     chaincode, err := contractapi.NewChaincode(&SmartContract{})
