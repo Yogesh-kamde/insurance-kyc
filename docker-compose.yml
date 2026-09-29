@@ -1,0 +1,42 @@
+version: '3.8'
+
+networks:
+  insurance_network:
+    external: true
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: insurance-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - CHANNEL_NAME=insurancechannel
+      - CHAINCODE_NAME=kyc
+      - MSP_ID=Org1MSP
+      - PEER_ENDPOINT=peer0.org1.example.com:7051
+      - PEER_HOST_ALIAS=peer0.org1.example.com
+      - JWT_SECRET=insurancekyc_super_secret_jwt_key_2026
+      - MONGODB_URI=${MONGODB_URI}
+    volumes:
+      - ~/hyperledger/insurance-kyc/network/organizations:/organizations
+    networks:
+      - insurance_network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: insurance-frontend
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+    networks:
+      - insurance_network
+    restart: unless-stopped
+
