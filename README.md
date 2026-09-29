@@ -1,34 +1,32 @@
 # Insurance KYC Platform on Hyperledger Fabric
 
-A full-stack enterprise blockchain application for insurance KYC verification and policy management, built on a **multi-organization Hyperledger Fabric network** with **Go chaincode**, **Node.js backend**, and **React frontend**.
+A full-stack enterprise blockchain application for insurance KYC verification, policy management, and claims processing, built on a **3-organization Hyperledger Fabric network** with **Go chaincode**, a **Node.js backend**, and a **React frontend**.
 
 ---
 
 ## 🏗️ Architecture
 
-```
-React Frontend (3 Role-based Portals)
-        ↓ HTTP (Axios)
-Node.js + Express Backend (Fabric Gateway SDK)
-        ↓ gRPC
+React Frontend (5 Role-based Portals)
+↓ HTTP (Axios) + HttpOnly Cookies
+Node.js + Express Backend (Fabric Gateway SDK, JWT auth, WebSockets)
+↓ gRPC
 Hyperledger Fabric Network (Go Chaincode)
-  Org1: Insurer    → IssuePolicy, FileClaim, ProcessPayout
-  Org2: Regulator  → VerifyKYC, ApproveOnboarding
-        ↕
-Ledger (LevelDB) — immutable on-chain records
-```
+Org1: Insurer → IssuePolicy, FileClaim
+Org2: Regulator → VerifyKYC
+Org3: Claims Assessor → AssessClaim
+↕
+MongoDB Atlas — off-chain storage, synced with ledger state
+
 
 ---
 
 ## 🔄 Workflow
-
-```
-1. Customer registers → KYCStatus: PENDING
-2. Regulator reviews and approves/rejects KYC
-3. Insurer issues policy (only if KYC = APPROVED)
-4. Customer files a claim
-5. Insurer processes payout
-```
+Customer registers → KYCStatus: PENDING (blockchain + MongoDB)
+Regulator reviews KYC → approves/rejects
+Insurer issues policy → requires KYCStatus = APPROVED, auto-generated policy ID
+Insurer files a claim → auto-generated claim ID
+Claims Assessor reviews → approves/rejects the claim
+Payout Officer processes → marks claim as PAID
 
 ---
 
@@ -36,36 +34,53 @@ Ledger (LevelDB) — immutable on-chain records
 
 | Layer | Technology |
 |-------|-----------|
-| Blockchain | Hyperledger Fabric v2.5 |
+| Blockchain | Hyperledger Fabric v2.5, 3-org network, Raft orderer |
 | Chaincode | Go (Golang) |
-| Backend | Node.js + Express |
-| Fabric SDK | @hyperledger/fabric-gateway |
-| Frontend | React.js |
-| HTTP Client | Axios |
-| Off-chain DB | MongoDB (planned) |
+| Backend | Node.js + Express, Socket.io, JWT |
+| Fabric SDK | `@hyperledger/fabric-gateway` |
+| Frontend | React.js, Axios |
+| Off-chain DB | MongoDB Atlas |
+| Infra | Docker, Docker Compose |
 
 ---
 
 ## 📁 Project Structure
 
-```
 insurance-kyc/
-├── chaincode/          # Go chaincode
-│   ├── kyc.go          # Smart contract (7 functions)
-│   └── go.mod
-├── backend/            # Node.js API server
-│   ├── app.js          # Express routes
-│   ├── utils/
-│   │   └── fabric.js   # Fabric Gateway connection
-│   └── .env
-└── frontend/           # React application
-    └── src/
-        ├── App.js
-        └── pages/
-            ├── CustomerPortal.js
-            ├── RegulatorDashboard.js
-            └── InsurerDashboard.js
-```
+├── chaincode/
+│ ├── kyc.go # Smart contract (8 functions, 3 structs)
+│ └── go.mod
+├── backend/
+│ ├── app.js # Express routes
+│ ├── seed.js # Test data seeder
+│ ├── middleware/
+│ │ ├── auth.js # JWT + HttpOnly cookie auth
+│ │ └── validate.js # Input validation
+│ ├── models/ # User, Customer, Policy, Claim
+│ ├── routes/
+│ │ └── auth.js # register + login
+│ ├── utils/
+│ │ ├── fabric.js # Fabric Gateway connection (configurable via .env)
+│ │ └── db.js # MongoDB connection
+│ └── .env # not committed — see Setup
+└── frontend/
+└── src/
+├── App.js
+└── pages/
+├── CustomerPortal.js
+├── RegulatorDashboard.js
+├── InsurerDashboard.js
+├── AssessorDashboard.js
+└── PayoutDashboard.js
+
+network/ # Custom Docker Compose Fabric network
+├── network.sh # up / down / restart
+├── configtx.yaml # orgs, policies, anchor peers
+├── docker-compose.yml # 3 peers, orderer, 4 CAs, CLI
+└── scripts/
+├── registerEnroll.sh # crypto material generation
+└── setup.sh # channel + chaincode setup
+
 
 ---
 
@@ -73,13 +88,16 @@ insurance-kyc/
 
 | Function | Org | Description |
 |----------|-----|-------------|
-| `RegisterCustomer` | Any | Register a new customer with KYCStatus = PENDING |
+| `RegisterCustomer` | Any | Register a new customer with `KYCStatus = PENDING` |
 | `VerifyKYC` | Regulator | Approve or reject customer KYC |
-| `GetCustomer` | Any | Read customer data from ledger |
-| `IssuePolicy` | Insurer | Issue policy (requires KYC = APPROVED) |
-| `GetPolicy` | Any | Read policy data from ledger |
-| `FileClaim` | Any | File an insurance claim |
-| `ProcessPayout` | Insurer | Process claim payout |
+| `GetCustomer` | Any | Read customer data from the ledger |
+| `IssuePolicy` | Insurer | Issue a policy (requires `KYCStatus = APPROVED`) |
+| `GetPolicy` | Any | Read policy data from the ledger |
+| `FileClaim` | Insurer | File a claim against a policy |
+| `AssessClaim` | Claims Assessor | Approve or reject a filed claim |
+| `ProcessPayout` | Payout Officer | Marks an assessed claim as paid |
+
+Each write follows a standard 5-step pattern: Read → Unmarshal → Modify → Marshal → Write.
 
 ---
 
@@ -87,65 +105,75 @@ insurance-kyc/
 
 ### Prerequisites
 - Docker + Docker Compose
-- Hyperledger Fabric v2.5 (fabric-samples)
-- Go 1.18+
+- Go 1.18+ (for chaincode)
 - Node.js v18+
-- WSL2 (Ubuntu) on Windows or Linux
+- A MongoDB Atlas cluster (or local MongoDB)
+- WSL2 (Ubuntu) on Windows, or Linux
 
-### 1. Start the Fabric Network
+### 1. Configure environment variables
+
+**`backend/.env`**
+
+PORT=3000
+CHANNEL_NAME=insurancechannel
+CHAINCODE_NAME=kyc
+MSP_ID=Org1MSP
+PEER_ENDPOINT=localhost:7051
+PEER_ENDPOINT_ORG2=localhost:9051
+PEER_ENDPOINT_ORG3=localhost:11051
+PEER_HOST_ALIAS=peer0.org1.example.com
+JWT_SECRET=<your-secret>
+MONGODB_URI=<your-mongodb-uri>
+NETWORK_ORG_PATH=/absolute/path/to/insurance-kyc/network/organizations
+
+
+**`frontend/.env`**
+
+PORT=3001
+
+
+Neither file is committed — create them yourself using the templates above.
+
+### 2. Start the Fabric Network
+
+The network is fully self-contained — no dependency on `fabric-samples/test-network`.
 
 ```bash
-cd ~/hyperledger/fabric-samples/test-network
+cd network
+./network.sh up
+```
+
+This starts 3 peers, an orderer, and 4 CAs; generates crypto material; creates the channel via the channel participation API; and packages, installs, approves, and commits the chaincode automatically. Wait for `🎉 Network is up!`.
+
+To rebuild from a clean state:
+```bash
 ./network.sh down
-./network.sh up -ca
-./network.sh createChannel -c insurancechannel
+sudo rm -rf organizations config/*.block
+./network.sh up
 ```
+This wipes the ledger — reseed afterward.
 
-### 2. Deploy the Chaincode
+### 3. Seed test data (only after a fresh network)
 
 ```bash
-export PATH=${PWD}/../bin:$PATH
-export FABRIC_CFG_PATH=${PWD}/../config/
-
-# Package
-peer lifecycle chaincode package kyc.tar.gz \
-  --path ~/hyperledger/insurance-kyc/chaincode \
-  --lang golang --label kyc_1.0
-
-# Install on Org1
-export CORE_PEER_TLS_ENABLED=true
-export CORE_PEER_LOCALMSPID="Org1MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-export CORE_PEER_ADDRESS=localhost:7051
-peer lifecycle chaincode install kyc.tar.gz
-
-# Install on Org2
-export CORE_PEER_LOCALMSPID="Org2MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp
-export CORE_PEER_ADDRESS=localhost:9051
-peer lifecycle chaincode install kyc.tar.gz
-
-# Approve and Commit (update CC_PACKAGE_ID from install output)
-export CC_PACKAGE_ID=kyc_1.0:<your-package-id>
-
-# Approve for both orgs and commit
-# (see full deployment steps in docs)
+cd backend
+npm install
+node seed.js
 ```
 
-### 3. Start the Backend
+### 4. Start the Backend
 
 ```bash
-cd ~/hyperledger/insurance-kyc/backend
+cd backend
 node app.js
 # Server runs on http://localhost:3000
 ```
 
-### 4. Start the Frontend
+### 5. Start the Frontend
 
 ```bash
-cd ~/hyperledger/insurance-kyc/frontend
+cd frontend
+npm install
 npm start
 # App runs on http://localhost:3001
 ```
@@ -156,21 +184,57 @@ npm start
 
 | Method | Route | Description |
 |--------|-------|-------------|
-| POST | `/customer/register` | Register a new customer |
+| POST | `/auth/register` | Register a new customer |
+| POST | `/auth/login` | Log in (returns role, sets HttpOnly cookie) |
+| POST | `/auth/logout` | Log out |
 | GET | `/customer/:customerID` | Get customer details |
-| POST | `/kyc/verify` | Approve or reject KYC |
-| POST | `/policy/issue` | Issue a policy |
+| POST | `/kyc/verify` | Approve or reject KYC (Regulator) |
+| POST | `/policy/issue` | Issue a policy (Insurer) |
 | GET | `/policy/:policyId` | Get policy details |
-| POST | `/claim/file` | File a claim |
-| POST | `/claim/payout` | Process payout |
+| POST | `/claim/file` | File a claim (Insurer) |
+| POST | `/claim/assess` | Approve or reject a claim (Assessor) |
+| POST | `/claim/payout` | Process payout (Payout Officer) |
 
 ---
 
 ## 👤 Role-based Portals
 
-- **Customer Portal** — Register and check KYC status
-- **Regulator Dashboard** — Review and approve/reject KYC
-- **Insurer Dashboard** — Issue policies, file claims, process payouts
+- **Customer Portal** — Register, check KYC status, view policies
+- **Regulator Dashboard** — Review and approve/reject pending KYC
+- **Insurer Dashboard** — Issue policies, file claims
+- **Assessor Dashboard** — Review and approve/reject filed claims
+- **Payout Dashboard** — Process payouts for assessed claims
+
+---
+
+## 🔑 Test Accounts
+
+| Username | Password | Role |
+|---|---|---|
+| customer1 | pass123 | Customer |
+| regulator1 | pass123 | Regulator |
+| insurer1 | pass123 | Insurer |
+| assessor1 | pass123 | Claims Assessor |
+| payout1 | pass123 | Payout Officer |
+
+Seed accounts only — change credentials before any real deployment.
+
+---
+
+## ⚙️ Notes on the Fabric Network
+
+- Uses Fabric's **channel participation API** (`osnadmin`), not the legacy system-channel flow — no `fabric-samples/test-network` dependency.
+- Anchor peers are defined directly in `configtx.yaml` and baked into the genesis block; no separate anchor-peer update step is needed.
+- CA containers run as the host user (`user: "${HOST_UID}:${GID}"` in `docker-compose.yml`) to avoid root-owned bind-mount permission issues.
+- The backend connects to peers via `localhost:<port>` from the host, with `peerHostAlias` set to each peer's Docker-internal hostname for TLS certificate verification.
+
+---
+
+## 📌 Status
+
+✅ **Complete** — 3-org network, chaincode deployed and committed, all 5 dashboards, JWT auth, MongoDB sync, WebSocket notifications.
+
+⏳ **In progress** — per-org transaction routing (all writes currently execute under Org1's identity regardless of role), claims history view on the customer dashboard.
 
 ---
 
