@@ -239,10 +239,6 @@ Seed accounts only — change credentials before any real deployment.
 
 ## 📌 Status
 
-✅ **Complete** — 3-org network with per-org transaction routing (each role submits transactions under its own org's identity), chaincode deployed and committed, all 5 dashboards, JWT auth, MongoDB sync, WebSocket notifications, test coverage, and a working public deployment.
-
-## 📌 Status
-
 ✅ **Complete** — 3-org network with per-org transaction routing (each role submits transactions under its own org's identity), chaincode deployed and committed, all 5 dashboards, JWT auth with rate-limited auth routes, MongoDB sync, WebSocket notifications, Go + Jest test suites, `/health` endpoint, live deployment via nginx + Cloudflare Tunnel.
   cd chaincode
   go test ./... -v
