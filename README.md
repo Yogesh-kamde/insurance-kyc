@@ -60,7 +60,8 @@ insurance-kyc/
 │   ├──__tests__/                # Jest/Supertest route tests
 │   ├── middleware/
 │   │   ├── auth.js          # JWT + HttpOnly cookie auth
-│   │   └── validate.js      # Input validation
+│   │   ├── validate.js      # Input validation
+│   │   └── rateLimiter.js   # express-rate-limit config for auth routes
 │   ├── models/               # User, Customer, Policy, Claim
 │   ├── routes/
 │   │   └── auth.js          # register + login
@@ -199,6 +200,7 @@ npm start
 | POST | `/claim/file` | File a claim (Insurer) |
 | POST | `/claim/assess` | Approve or reject a claim (Assessor) |
 | POST | `/claim/payout` | Process payout (Payout Officer) |
+| GET    | /health              | Health check (no auth) |
 
 ---
 
@@ -239,14 +241,13 @@ Seed accounts only — change credentials before any real deployment.
 
 ✅ **Complete** — 3-org network with per-org transaction routing (each role submits transactions under its own org's identity), chaincode deployed and committed, all 5 dashboards, JWT auth, MongoDB sync, WebSocket notifications, test coverage, and a working public deployment.
 
-## 🧪 Testing
+## 📌 Status
 
-- **Chaincode**: 20 Go unit tests (`chaincode/kyc_test.go`) covering every smart contract function's success and failure branches, using `shimtest.MockStub`.
-```bash
+✅ **Complete** — 3-org network with per-org transaction routing (each role submits transactions under its own org's identity), chaincode deployed and committed, all 5 dashboards, JWT auth with rate-limited auth routes, MongoDB sync, WebSocket notifications, Go + Jest test suites, `/health` endpoint, live deployment via nginx + Cloudflare Tunnel.
   cd chaincode
   go test ./... -v
 ```
-- **Backend**: 25 Jest/Supertest tests (`backend/__tests__/`) covering auth, validation, and success paths for every write route, with the Fabric Gateway and MongoDB fully mocked so tests run without the network or a database.
+- **Backend**: 26 Jest/Supertest tests (`backend/__tests__/`) covering auth, validation, and success paths for every write route, plus rate-limiting enforcement on `/auth/login`, with the Fabric Gateway and MongoDB fully mocked so tests run without the network or a database.
 ```bash
   cd backend
   npm test
@@ -255,6 +256,8 @@ Seed accounts only — change credentials before any real deployment.
 ## 🌐 Deployment
 
 The full stack (Fabric network, backend, MongoDB, and the React build) runs locally and is exposed publicly through nginx (serving the frontend build and reverse-proxying API routes to the backend on one origin) and a Cloudflare Tunnel.
+
+**Live demo:** https://your-tunnel-url-here *(up while the host machine is running `start.sh`)*
 
 ```bash
 ./start.sh
