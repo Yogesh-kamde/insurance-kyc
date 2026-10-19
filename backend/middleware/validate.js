@@ -53,5 +53,11 @@ const validatePayout = [
     body('payoutAmount').notEmpty().isNumeric().withMessage('Payout amount must be a number'),
     checkErrors
 ]
+// Assess Claim validation
+const validateAssess = [
+    body('claimID').notEmpty().withMessage('Claim ID is required'),
+    body('decision').isIn(['ASSESSED', 'REJECTED']).withMessage('Decision must be ASSESSED or REJECTED'),
+    checkErrors
+]
 
-module.exports = { validateRegister, validateKYC, validatePolicy, validateClaim, validatePayout }
+module.exports = { validateRegister, validateKYC, validatePolicy, validateClaim, validatePayout,validateAssess}

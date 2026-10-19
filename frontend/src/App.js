@@ -7,8 +7,8 @@ import InsurerDashboard from './pages/InsurerDashboard'
 import AssessorDashboard from './pages/AssessorDashboard'
 import PayoutDashboard from './pages/PayoutDashboard'
 
-const API = 'http://localhost:3000'
-const socket = io('http://localhost:3000')
+const API = ''
+const socket = io()
 axios.defaults.withCredentials = true
 function App() {
   const [token, setToken] = useState(null)

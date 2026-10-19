@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 
-const API = 'http://localhost:3000'
+const API = ''
 
 function CustomerPortal({ token, customerID }) {
   const [customer, setCustomer] = useState(null)

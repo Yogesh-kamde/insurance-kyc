@@ -1,131 +1,40 @@
 #!/bin/bash
+set -e
 
-echo " Starting Insurance KYC Platform..."
+PROJECT=~/hyperledger/insurance-kyc
 
-#  Step 1: Start Fabric Network 
-echo " Starting Hyperledger Fabric network..."
-cd ~/hyperledger/fabric-samples/test-network
-./network.sh down
-./network.sh up -ca
-./network.sh createChannel -c insurancechannel
+echo "🔍 Checking Fabric network..."
+if ! docker ps --format '{{.Names}}' | grep -q "peer0.org1.example.com"; then
+    echo "🚀 Network not running — doing a clean rebuild (this wipes any old ledger data and takes a minute)..."
+    cd $PROJECT/network
+    docker compose down -v || true
+    sudo rm -rf organizations/ config/
+    ./network.sh up
+    echo "📝 Reapplying chaincode v2.0 (payout fix)..."
+    docker compose -f docker-compose.yml run --rm cli bash ./scripts/upgradeCC.sh
+else
+    echo "✅ Network already running."
+fi
 
-# Step 2: Add Org3 
-echo " Adding Org3 (Claims Assessor)..."
-cd addOrg3
-./addOrg3.sh up -c insurancechannel -ca
-cd ..
+echo "🚀 Starting backend..."
+cd $PROJECT/backend
+nohup node server.js > backend.log 2>&1 &
+sleep 3
+echo "✅ Backend started (logs: $PROJECT/backend/backend.log)"
 
-#  Step 3: Setup environment 
-echo "  Setting up environment..."
-export PATH=${PWD}/../bin:$PATH
-export FABRIC_CFG_PATH=${PWD}/../config/
-export CORE_PEER_TLS_ENABLED=true
+echo "🚀 Checking nginx..."
+sudo systemctl start nginx
+echo "✅ nginx running."
 
-#  Step 4: Package chaincode 
-echo " Packaging chaincode..."
-peer lifecycle chaincode package kyc.tar.gz \
-  --path ~/hyperledger/insurance-kyc/chaincode \
-  --lang golang \
-  --label kyc_1.0
+echo "🚀 Starting Cloudflare Tunnel..."
+nohup cloudflared tunnel --url http://localhost:80 > $PROJECT/tunnel.log 2>&1 &
+sleep 6
 
-#  Step 5: Install on Org1 
-echo " Installing chaincode on Org1..."
-export CORE_PEER_LOCALMSPID="Org1MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-export CORE_PEER_ADDRESS=localhost:7051
-peer lifecycle chaincode install kyc.tar.gz
-
-#  Step 6: Install on Org2
-echo " Installing chaincode on Org2..."
-export CORE_PEER_LOCALMSPID="Org2MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp
-export CORE_PEER_ADDRESS=localhost:9051
-peer lifecycle chaincode install kyc.tar.gz
-
-#  Step 7: Install on Org3 
-echo " Installing chaincode on Org3..."
-export CORE_PEER_LOCALMSPID="Org3MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org3.example.com/peers/peer0.org3.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org3.example.com/users/Admin@org3.example.com/msp
-export CORE_PEER_ADDRESS=localhost:11051
-peer lifecycle chaincode install kyc.tar.gz
-
-#  Step 8: Get Package ID 
-echo " Getting package ID..."
-export CORE_PEER_LOCALMSPID="Org1MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-export CORE_PEER_ADDRESS=localhost:7051
-CC_PACKAGE_ID=$(peer lifecycle chaincode queryinstalled | grep "kyc_1.0" | awk '{print $3}' | tr -d ',')
-echo "Package ID: $CC_PACKAGE_ID"
-
-#  Step 9: Approve for Org1 
-echo " Approving for Org1..."
-peer lifecycle chaincode approveformyorg \
-  -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com \
-  --channelID insurancechannel --name kyc --version 1.0 \
-  --package-id $CC_PACKAGE_ID --sequence 1 --tls \
-  --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
-
-#  Step 10: Approve for Org2 
-echo " Approving for Org2..."
-export CORE_PEER_LOCALMSPID="Org2MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp
-export CORE_PEER_ADDRESS=localhost:9051
-peer lifecycle chaincode approveformyorg \
-  -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com \
-  --channelID insurancechannel --name kyc --version 1.0 \
-  --package-id $CC_PACKAGE_ID --sequence 1 --tls \
-  --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
-
-#  Step 11: Approve for Org3
-echo " Approving for Org3..."
-export CORE_PEER_LOCALMSPID="Org3MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org3.example.com/peers/peer0.org3.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org3.example.com/users/Admin@org3.example.com/msp
-export CORE_PEER_ADDRESS=localhost:11051
-peer lifecycle chaincode approveformyorg \
-  -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com \
-  --channelID insurancechannel --name kyc --version 1.0 \
-  --package-id $CC_PACKAGE_ID --sequence 1 --tls \
-  --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
-
-# Step 12: Commit 
-echo " Committing chaincode..."
-export CORE_PEER_LOCALMSPID="Org1MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-export CORE_PEER_ADDRESS=localhost:7051
-peer lifecycle chaincode commit \
-  -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com \
-  --channelID insurancechannel --name kyc --version 1.0 --sequence 1 --tls \
-  --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem \
-  --peerAddresses localhost:7051 \
-  --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt \
-  --peerAddresses localhost:9051 \
-  --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt \
-  --peerAddresses localhost:11051 \
-  --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org3.example.com/peers/peer0.org3.example.com/tls/ca.crt
-
-#Step 13: Seed test data
-echo "Seeding test data..."
-cd ~/hyperledger/insurance-kyc/backend
-node seed.js
-
-
-#Step 14: Start Backend 
-echo " Starting Node.js backend..."
-cd ~/hyperledger/insurance-kyc/backend
-node app.js &
-
-#  Step 15: Start Frontend 
-echo "Starting React frontend..."
-cd ~/hyperledger/insurance-kyc/frontend
-npm start &
-
-echo "   Insurance KYC Platform is running!"
-echo "   Frontend: http://localhost:3001"
-echo "   Backend:  http://localhost:3000"
+TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' $PROJECT/tunnel.log | head -1)
+echo ""
+echo "🎉 Everything is up!"
+echo "🌐 Public URL: $TUNNEL_URL"
+echo ""
+echo "Logs:"
+echo "  Backend: $PROJECT/backend/backend.log"
+echo "  Tunnel:  $PROJECT/tunnel.log"

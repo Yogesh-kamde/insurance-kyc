@@ -22,3 +22,10 @@ network/fabric-ca-client-config.yaml
 
 # Compiled chaincode binary
 chaincode/insurance-kyc
+
+# Runtime logs
+backend/backend.log
+tunnel.log
+
+# Local curl testing cookie jars
+backend/cookie_*.txt

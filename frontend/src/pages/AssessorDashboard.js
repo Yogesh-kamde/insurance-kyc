@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 
-const API = 'http://localhost:3000'
+const API = ''
 
 function AssessorDashboard({ token }) {
   const [claims, setClaims] = useState([])

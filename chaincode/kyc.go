@@ -170,6 +170,19 @@ func (s *SmartContract) FileClaim(ctx contractapi.TransactionContextInterface,cu
     if policyData == nil {
     return fmt.Errorf("policy not found")
 }
+
+    var policy Policy
+    err = json.Unmarshal(policyData, &policy)
+    if err != nil {
+        return fmt.Errorf("failed to unmarshal policy:%v", err)
+    }
+    if policy.Status != "ACTIVE" {
+        return fmt.Errorf("policy is not active")
+    }
+    if policy.CustomerID != customerID {
+        return fmt.Errorf("policy does not belong to this customer")
+    }
+
     //check claim
     claimData,err := ctx.GetStub().GetState(claimID)
     if err != nil{
@@ -208,13 +221,16 @@ func (s *SmartContract) ProcessPayout(ctx contractapi.TransactionContextInterfac
         return fmt.Errorf("failed to read from ledger%v",err)
     }
    if claimData == nil {
-    return fmt.Errorf("claim not found")       //
+    return fmt.Errorf("claim not found")
 }
-    
+
     var claim Claim
    err = json.Unmarshal(claimData, &claim) 
     if err != nil{
         return fmt.Errorf("failed to UnMarshal claim%v",err)
+    }
+    if claim.Status != "ASSESSED" {
+        return fmt.Errorf("claim is not approved for payout")
     }
     claim.Status = "PAID" 
     claim.PayoutAmount = payoutAmount

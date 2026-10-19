@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import axios from 'axios'
 
-const API = 'http://localhost:3000'
+const API = ''
 
 function InsurerDashboard({ token }) {
   const [policyForm, setPolicyForm] = useState({ policyType: '', customerID: '', coverageAmount: '' })

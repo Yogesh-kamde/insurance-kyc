@@ -2,6 +2,14 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const { getContract } = require('./utils/fabric')
+
+const roleToOrg = {
+    customer: 'org1',
+    insurer: 'org1',
+    payout: 'org1',
+    regulator: 'org2',
+    assessor: 'org3'
+}
 const auth = require('./middleware/auth')
 const authRoutes = require('./routes/auth')
 const connectDB = require('./utils/db')
@@ -10,12 +18,9 @@ const Claim = require('./models/Claim')
 const crypto = require('crypto')
 const Policy = require('./models/Policy')
 const bcrypt = require('bcryptjs')
-const { validateRegister, validateKYC, validatePolicy, validateClaim, validatePayout } = require('./middleware/validate')
+const { validateRegister, validateKYC, validatePolicy, validateClaim, validatePayout, validateAssess } = require('./middleware/validate')
 const cookieParser = require('cookie-parser')
 
-
-// Connect to MongoDB
-connectDB()
 
 const app = express()
 app.use(cors({
@@ -58,7 +63,7 @@ app.post('/customer/register', auth(['customer']),validateRegister, async (req, 
         }
 
         // Save to blockchain
-        const { contract, gateway, client } = await getContract()
+        const { contract, gateway, client } = await getContract('org1')
         await contract.submitTransaction('RegisterCustomer', customerID, fullName, contact, address, income, identityProof)
         gateway.close()
         client.close()
@@ -84,7 +89,7 @@ app.post('/customer/register', auth(['customer']),validateRegister, async (req, 
 // Get Customer — customer and regulator
 app.get('/customer/:customerID', auth(['customer', 'regulator']), async (req, res) => {
     try {
-        const { contract, gateway, client } = await getContract()
+        const { contract, gateway, client } = await getContract(roleToOrg[req.user.role])
         const result = await contract.evaluateTransaction('GetCustomer', req.params.customerID)
         gateway.close()
         client.close()
@@ -97,7 +102,7 @@ app.get('/customer/:customerID', auth(['customer', 'regulator']), async (req, re
 app.post('/kyc/verify', auth(['regulator']), validateKYC, async (req, res) => {
     try {
         const { customerID, decision } = req.body
-        const { contract, gateway, client } = await getContract()
+        const { contract, gateway, client } = await getContract('org2')
         await contract.submitTransaction('VerifyKYC', customerID, decision)
         gateway.close()
         client.close()
@@ -130,7 +135,7 @@ app.post('/policy/issue', auth(['insurer']), validatePolicy, async (req, res) =>
         const policyId = 'POL-' + Date.now()
 
         // Save to blockchain
-        const { contract, gateway, client } = await getContract()
+        const { contract, gateway, client } = await getContract('org1')
         await contract.submitTransaction('IssuePolicy', policyId, policyType, customerID, coverageAmount)
         gateway.close()
         client.close()
@@ -156,7 +161,7 @@ app.post('/policy/issue', auth(['insurer']), validatePolicy, async (req, res) =>
 // Get Policy — insurer and customer
 app.get('/policy/:policyId', auth(['insurer', 'customer']), async (req, res) => {
     try {
-        const { contract, gateway, client } = await getContract()
+        const { contract, gateway, client } = await getContract('org1')
         const result = await contract.evaluateTransaction('GetPolicy', '', req.params.policyId)
         gateway.close()
         client.close()
@@ -180,7 +185,7 @@ app.post('/claim/file', auth(['insurer']), validateClaim, async (req, res) => {
         }
 
         // Save to blockchain
-        const { contract, gateway, client } = await getContract()
+        const { contract, gateway, client } = await getContract('org1')
         await contract.submitTransaction('FileClaim', customerID, policyId, claimID, reason, claimAmount)
         gateway.close()
         client.close()
@@ -199,11 +204,10 @@ app.post('/claim/file', auth(['insurer']), validateClaim, async (req, res) => {
 app.post('/claim/payout', auth(['payout']), validatePayout, async (req, res) => {
     try {
         const { claimID, payoutAmount } = req.body
-        const { contract, gateway, client } = await getContract()
+        const { contract, gateway, client } = await getContract('org1')
         await contract.submitTransaction('ProcessPayout', claimID, payoutAmount)
         gateway.close()
         client.close()
-
         // Update MongoDB status
         await Claim.findOneAndUpdate({ claimID }, { status: 'PAID', payoutAmount })
 
@@ -213,7 +217,7 @@ app.post('/claim/payout', auth(['payout']), validatePayout, async (req, res) => 
     }
 })
 // Assess Claim -assessor only (Org3)
-app.post('/claim/assess', auth(['assessor']), async (req, res) => {
+app.post('/claim/assess', auth(['assessor']), validateAssess ,async (req, res) => {
     try {
         const { claimID, decision } = req.body
         const { contract, gateway, client } = await getContract('org3')
@@ -282,24 +286,4 @@ app.get('/customers/pending', auth(['regulator']), async (req, res) => {
         res.status(500).json({ success: false, error: err.message })
     }
 })
-// WebSocket setup
-const http = require('http')
-const { Server } = require('socket.io')
-
-const server = http.createServer(app)
-const io = new Server(server, {
-    cors: { origin: 'http://localhost:3001', methods: ['GET', 'POST'] }
-})
-
-io.on('connection', (socket) => {
-    console.log('Client connected:', socket.id)
-    socket.on('disconnect', () => {
-        console.log('Client disconnected:', socket.id)
-    })
-})
-
-// Make io available to routes
-app.set('io', io)
-
-const PORT = process.env.PORT || 3000
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`))
+module.exports = app
