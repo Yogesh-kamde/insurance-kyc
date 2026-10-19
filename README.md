@@ -50,48 +50,43 @@ Payout Officer processes → marks claim as PAID
 
 insurance-kyc/
 ├── chaincode/
-│ ├── kyc.go # Smart contract (8 functions, 3 structs)
-  |── kyc_test.go       # Go unit tests
-│ └── go.mod
+│   ├── kyc.go              # Smart contract (8 functions, 3 structs)
+│   ├── kyc_test.go         # Go unit tests
+│   └── go.mod
 ├── backend/
-│ ├── app.js # Express routes
-│ ├── seed.js # Test data seeder
-│ ├── middleware/
-│ │ ├── auth.js # JWT + HttpOnly cookie auth
-│ │ └── validate.js # Input validation
-│ ├── models/ # User, Customer, Policy, Claim
-│ ├── routes/
-│ │ └── auth.js # register + login
-│ ├── utils/
-│ │ ├── fabric.js # Fabric Gateway connection (configurable via .env)
-│ │ └── db.js # MongoDB connection
-│ └── .env # not committed — see Setup
-└── frontend/
-└── src/
-├── App.js
-└── pages/
-├── CustomerPortal.js
-├── RegulatorDashboard.js
-├── InsurerDashboard.js
-├── AssessorDashboard.js
-└── PayoutDashboard.js
-├── start.sh              # Bring up the full stack (network + backend + nginx + tunnel)
+│   ├── app.js               # Express app (routes, middleware)
+│   ├── server.js            # Entry point (listen, Socket.IO, DB connect)
+│   ├── seed.js               # Test data seeder
+│   ├──__tests__/                # Jest/Supertest route tests
+│   ├── middleware/
+│   │   ├── auth.js          # JWT + HttpOnly cookie auth
+│   │   └── validate.js      # Input validation
+│   ├── models/               # User, Customer, Policy, Claim
+│   ├── routes/
+│   │   └── auth.js          # register + login
+│   ├── utils/
+│   │   ├── fabric.js        # Fabric Gateway connection (configurable via .env)
+│   │   └── db.js            # MongoDB connection
+│   └── .env                  # not committed — see Setup
+├── frontend/
+│   └── src/
+│       ├── App.js
+│       └── pages/
+│           ├── CustomerPortal.js
+│           ├── RegulatorDashboard.js
+│           ├── InsurerDashboard.js
+│           ├── AssessorDashboard.js
+│           └── PayoutDashboard.js
+├── network/                  # Custom Docker Compose Fabric network
+│   ├── network.sh            # up / down / restart
+│   ├── configtx.yaml         # orgs, policies, anchor peers
+│   ├── docker-compose.yml    # 3 peers, orderer, 4 CAs, CLI
+│   └── scripts/
+│       ├── upgradeCC.sh      # Chaincode version upgrades
+│       ├── registerEnroll.sh # crypto material generation
+│       └── setup.sh          # channel + chaincode setup
+├── start.sh                  # Bring up the full stack (network + backend + nginx + tunnel)
 └── README.md
-
-
-network/ # Custom Docker Compose Fabric network
-├── network.sh # up / down / restart
-├── configtx.yaml # orgs, policies, anchor peers
-├── docker-compose.yml # 3 peers, orderer, 4 CAs, CLI
-└── scripts/
-   └── upgradeCC.sh         # Chaincode version upgrades
-├── registerEnroll.sh # crypto material generation
-└── setup.sh # channel + chaincode setup
-│ ├── server.js         # Entry point (listen, Socket.IO, DB connect)
-│ └── __tests__/        # Jest/Supertest route tests
-
-
----
 
 ## ⛓️ Chaincode Functions
 
