@@ -41,6 +41,8 @@ Payout Officer processes → marks claim as PAID
 | Frontend | React.js, Axios |
 | Off-chain DB | MongoDB Atlas |
 | Infra | Docker, Docker Compose |
+| Testing | Go testify, Jest, Supertest |
+| Deployment | nginx, Cloudflare Tunnel |
 
 ---
 
@@ -49,6 +51,7 @@ Payout Officer processes → marks claim as PAID
 insurance-kyc/
 ├── chaincode/
 │ ├── kyc.go # Smart contract (8 functions, 3 structs)
+  |── kyc_test.go       # Go unit tests
 │ └── go.mod
 ├── backend/
 │ ├── app.js # Express routes
@@ -72,14 +75,20 @@ insurance-kyc/
 ├── InsurerDashboard.js
 ├── AssessorDashboard.js
 └── PayoutDashboard.js
+├── start.sh              # Bring up the full stack (network + backend + nginx + tunnel)
+└── README.md
+
 
 network/ # Custom Docker Compose Fabric network
 ├── network.sh # up / down / restart
 ├── configtx.yaml # orgs, policies, anchor peers
 ├── docker-compose.yml # 3 peers, orderer, 4 CAs, CLI
 └── scripts/
+   └── upgradeCC.sh         # Chaincode version upgrades
 ├── registerEnroll.sh # crypto material generation
 └── setup.sh # channel + chaincode setup
+│ ├── server.js         # Entry point (listen, Socket.IO, DB connect)
+│ └── __tests__/        # Jest/Supertest route tests
 
 
 ---
@@ -165,7 +174,8 @@ node seed.js
 
 ```bash
 cd backend
-node app.js
+npm install
+node server.js
 # Server runs on http://localhost:3000
 ```
 
@@ -232,11 +242,32 @@ Seed accounts only — change credentials before any real deployment.
 
 ## 📌 Status
 
-✅ **Complete** — 3-org network, chaincode deployed and committed, all 5 dashboards, JWT auth, MongoDB sync, WebSocket notifications.
+✅ **Complete** — 3-org network with per-org transaction routing (each role submits transactions under its own org's identity), chaincode deployed and committed, all 5 dashboards, JWT auth, MongoDB sync, WebSocket notifications, test coverage, and a working public deployment.
 
-⏳ **In progress** — per-org transaction routing (all writes currently execute under Org1's identity regardless of role), claims history view on the customer dashboard.
+## 🧪 Testing
 
----
+- **Chaincode**: 20 Go unit tests (`chaincode/kyc_test.go`) covering every smart contract function's success and failure branches, using `shimtest.MockStub`.
+```bash
+  cd chaincode
+  go test ./... -v
+```
+- **Backend**: 25 Jest/Supertest tests (`backend/__tests__/`) covering auth, validation, and success paths for every write route, with the Fabric Gateway and MongoDB fully mocked so tests run without the network or a database.
+```bash
+  cd backend
+  npm test
+```
+
+## 🌐 Deployment
+
+The full stack (Fabric network, backend, MongoDB, and the React build) runs locally and is exposed publicly through nginx (serving the frontend build and reverse-proxying API routes to the backend on one origin) and a Cloudflare Tunnel.
+
+```bash
+./start.sh
+```
+
+This brings the Fabric network up (rebuilding from a clean state if it isn't already running), starts the backend, ensures nginx is running, and opens a Cloudflare Tunnel — printing the public HTTPS URL at the end.
+
+> Note: this is a laptop-hosted deployment — the public URL is only live while the host machine is running `start.sh`'s processes. A full rebuild also resets the ledger, since the network scripts aren't currently idempotent.
 
 ## 👨‍💻 Author
 
