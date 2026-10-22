@@ -64,7 +64,7 @@ insurance-kyc/
 │   ├── server.js            # Entry point (listen, Socket.IO, DB connect)
 │   ├── seed.js               # Test data seeder
 │   ├── __tests__/            # Jest/Supertest route tests
-│   │   └── errorHelper.test.js   # NEW — unit tests for extractChaincodeError
+│   │   └── errorHelper.test.js   # unit tests for extractChaincodeError
 │   ├── middleware/
 │   │   ├── auth.js          # JWT + HttpOnly cookie auth
 │   │   ├── validate.js      # Input validation
@@ -75,7 +75,7 @@ insurance-kyc/
 │   ├── utils/
 │   │   ├── fabric.js        # Fabric Gateway connection (configurable via .env)
 │   │   ├── db.js             # MongoDB connection
-│   │   └── errorHelper.js    # NEW — extracts real chaincode errors from Gateway SDK errors
+│   │   └── errorHelper.js    # extracts real chaincode errors from Gateway SDK errors
 │   └── .env                  # not committed — see Setup
 ├── frontend/
 │   └── src/
@@ -90,7 +90,7 @@ insurance-kyc/
 │   ├── network.sh            # up / down / restart
 │   ├── configtx.yaml         # orgs, policies, anchor peers
 │   ├── docker-compose.yml    # 3 peers, orderer, 4 CAs, CLI
-│   ├── collections_config.json   # NEW — private data collection definition (customerPII)
+│   ├── collections_config.json   # private data collection definition (customerPII)
 │   └── scripts/
 │       ├── upgradeCC.sh      # Chaincode version upgrades
 │       ├── registerEnroll.sh # crypto material generation
@@ -217,7 +217,7 @@ npm start
 
 ## 👤 Role-based Portals
 
-- **Customer Portal** — Register, check KYC status, view policies
+- **Customer Portal** — Register, check KYC status, view policy and claim history
 - **Regulator Dashboard** — Review and approve/reject pending KYC
 - **Insurer Dashboard** — Issue policies, file claims
 - **Assessor Dashboard** — Review and approve/reject filed claims
@@ -270,16 +270,13 @@ Seed accounts only — change credentials before any real deployment.
 
 The full stack (Fabric network, backend, MongoDB, and the React build) runs locally and is exposed publicly through nginx (serving the frontend build and reverse-proxying API routes to the backend on one origin) and a Cloudflare Tunnel.
 
-**Live demo:** https://your-tunnel-url-here *(up while the host machine is running `start.sh`)*
-
 ```bash
 ./start.sh
 ```
 
-This brings the Fabric network up (rebuilding from a clean state if it isn't already running), starts the backend, ensures nginx is running, and opens a Cloudflare Tunnel — printing the public HTTPS URL at the end.
+This brings the Fabric network up (rebuilding from a clean state if it isn't already running), starts the backend, ensures nginx is running, and opens a Cloudflare Tunnel — printing a fresh public HTTPS URL at the end of the run. Since Cloudflare Tunnel URLs are ephemeral per-session (a new one is generated each time the tunnel starts), there's no fixed link to publish here — run `./start.sh` to get a live URL for the current session.
 
 > Note: this is a laptop-hosted deployment — the public URL is only live while the host machine is running `start.sh`'s processes. A full rebuild also resets the ledger, since the network scripts aren't currently idempotent.
-
 ## 👨‍💻 Author
 
 **Yogesh Kamde**
