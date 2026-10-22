@@ -5,9 +5,11 @@ const User = require('../models/User')
 const { getContract } = require('../utils/fabric')
 const router = express.Router()
 const Customer = require('../models/Customer')
+const { loginLimiter, registerLimiter } = require('../middleware/rateLimiter');
+const { extractChaincodeError } = require('../utils/errorHelper')
 
 // Register — customers only
-router.post('/register', async (req, res) => {
+router.post('/register', registerLimiter, async (req, res) => {
     try {
         const { username, password, fullName, contact, address, income, identityProof } = req.body
 
@@ -19,7 +21,18 @@ router.post('/register', async (req, res) => {
         const customerID = 'CUST-' + Date.now()
 
         const { contract, gateway, client } = await getContract('org1')
-        await contract.submitTransaction('RegisterCustomer', customerID, fullName, contact, address, income, identityProof)
+
+        const proposal = contract.newProposal('RegisterCustomer', {
+            arguments: [customerID],
+            transientData: {
+                customer_pii: Buffer.from(JSON.stringify({
+                    fullName, contact, address, income, identityProof
+                }))
+            }
+        })
+        const transaction = await proposal.endorse()
+        await transaction.submit()
+
         gateway.close()
         client.close()
 
@@ -41,11 +54,11 @@ router.post('/register', async (req, res) => {
 
         res.json({ success: true, message: 'Registration successful', customerID })
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+        res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 // Login
-router.post('/login', async (req, res) => {
+router.post('/login',loginLimiter,async (req, res) => {
     try {
         const { username, password } = req.body
 
@@ -68,7 +81,7 @@ router.post('/login', async (req, res) => {
         // Set HttpOnly cookie
         res.cookie('token', token, {
             httpOnly: true,
-            secure: false,      // set to true in production with HTTPS
+            secure:process.env.NODE_ENV === 'production',      // set to true in production with HTTPS
             sameSite: 'strict',
             maxAge: 8 * 60 * 60 * 1000  // 8 hours
         })

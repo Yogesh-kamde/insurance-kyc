@@ -2,6 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const { getContract } = require('./utils/fabric')
+const { extractChaincodeError } = require('./utils/errorHelper')
 
 const roleToOrg = {
     customer: 'org1',
@@ -30,6 +31,14 @@ app.use(cors({
 app.use(express.json())
 app.use(cookieParser())
 
+// Health check — no auth, no DB/Fabric calls, just confirms the process is responsive
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    })
+})
 
 // Auth routes — public
 app.use('/auth', authRoutes)
@@ -49,41 +58,7 @@ app.post('/auth/admin-register', async (req, res) => {
         await user.save()
         res.json({ success: true, message: 'Staff user created' })
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
-    }
-})
-app.post('/customer/register', auth(['customer']),validateRegister, async (req, res) => {
-    try {
-        const { customerID, fullName, contact, address, income, identityProof, kycDocument } = req.body
-
-        // Hash the KYC document if provided
-        let kycDocumentHash = ''
-        if (kycDocument) {
-            kycDocumentHash = crypto.createHash('sha256').update(kycDocument).digest('hex')
-        }
-
-        // Save to blockchain
-        const { contract, gateway, client } = await getContract('org1')
-        await contract.submitTransaction('RegisterCustomer', customerID, fullName, contact, address, income, identityProof)
-        gateway.close()
-        client.close()
-
-        // Save to MongoDB
-        const customerDoc = new Customer({
-            customerID,
-            fullName,
-            contact,
-            address,
-            income,
-            identityProof,
-            kycDocument,        // full document off-chain
-            kycDocumentHash     // hash on-chain for integrity
-        })
-        await customerDoc.save()
-
-        res.json({ success: true, message: 'Customer registered successfully', kycDocumentHash })
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 // Get Customer — customer and regulator
@@ -95,7 +70,7 @@ app.get('/customer/:customerID', auth(['customer', 'regulator']), async (req, re
         client.close()
         res.json(JSON.parse(Buffer.from(result).toString('utf8')))
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 
@@ -123,7 +98,7 @@ app.post('/kyc/verify', auth(['regulator']), validateKYC, async (req, res) => {
 
         res.json({ success: true, message: `KYC ${decision} for ${customerID}` })
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 // Issue Policy - insurer only
@@ -153,8 +128,8 @@ app.post('/policy/issue', auth(['insurer']), validatePolicy, async (req, res) =>
         })
 
         res.json({ success: true, message: 'Policy issued successfully', policyId })
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    }catch (err) {
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 
@@ -167,7 +142,7 @@ app.get('/policy/:policyId', auth(['insurer', 'customer']), async (req, res) => 
         client.close()
         res.json(JSON.parse(Buffer.from(result).toString('utf8')))
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 
@@ -196,7 +171,7 @@ app.post('/claim/file', auth(['insurer']), validateClaim, async (req, res) => {
 
         res.json({ success: true, message: 'Claim filed successfully', claimID })
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 
@@ -213,7 +188,7 @@ app.post('/claim/payout', auth(['payout']), validatePayout, async (req, res) => 
 
         res.json({ success: true, message: 'Payout processed successfully' })
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 // Assess Claim -assessor only (Org3)
@@ -238,7 +213,7 @@ app.post('/claim/assess', auth(['assessor']), validateAssess ,async (req, res) =
 
         res.json({ success: true, message: `Claim ${decision} successfully` })
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 // Get policies by customerID
@@ -247,7 +222,7 @@ app.get('/policy/customer/:customerID', auth(['customer', 'insurer']), async (re
         const policies = await Policy.find({ customerID: req.params.customerID })
         res.json(policies)
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 // Get claims by customerID
@@ -256,7 +231,7 @@ app.get('/claim/customer/:customerID', auth(['customer', 'insurer']), async (req
         const claims = await Claim.find({ customerID: req.params.customerID })
         res.json(claims)
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 // Get pending claims -assessor only
@@ -265,7 +240,7 @@ app.get('/claim/pending', auth(['assessor']), async (req, res) => {
         const claims = await Claim.find({ status: 'PENDING' })
         res.json(claims)
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 // Get assessed claims - payout officer only
@@ -274,7 +249,7 @@ app.get('/claim/assessed', auth(['payout']), async (req, res) => {
         const claims = await Claim.find({ status: 'ASSESSED' })
         res.json(claims)
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 // Get all pending KYC customers — regulator only
@@ -283,7 +258,7 @@ app.get('/customers/pending', auth(['regulator']), async (req, res) => {
         const customers = await Customer.find({ kycStatus: 'PENDING' })
         res.json(customers)
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: extractChaincodeError(err) })
     }
 })
 module.exports = app

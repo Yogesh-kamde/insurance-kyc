@@ -67,6 +67,21 @@ describe('POST /policy/issue', () => {
             'IssuePolicy', 'POL-1234567890', 'Health', 'CUST1', '100000'
         )
     })
+
+    test('surfaces the real chaincode rejection reason when coverage is not positive', async () => {
+        __mockContract.submitTransaction.mockRejectedValueOnce({
+            message: '10 ABORTED: failed to endorse transaction, see attached details for more info',
+            details: [{ message: 'chaincode response 500, coverage amount must be greater than zero' }]
+        })
+
+        const res = await request(app)
+            .post('/policy/issue')
+            .set('Cookie', [`token=${insurerToken}`])
+            .send({ ...validBody, coverageAmount: '0' })
+
+        expect(res.status).toBe(500)
+        expect(res.body.error).toBe('coverage amount must be greater than zero')
+    }) 
 })
 
 describe('GET /policy/:policyId', () => {

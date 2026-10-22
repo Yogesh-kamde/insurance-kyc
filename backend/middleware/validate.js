@@ -12,17 +12,6 @@ const checkErrors = (req, res, next) => {
     next()
 }
 
-// Register Customer validation
-const validateRegister = [
-    body('customerID').notEmpty().withMessage('Customer ID is required'),
-    body('fullName').notEmpty().withMessage('Full name is required'),
-    body('contact').notEmpty().isLength({ min: 10, max: 10 }).withMessage('Contact must be 10 digits'),
-    body('address').notEmpty().withMessage('Address is required'),
-    body('income').notEmpty().withMessage('Income is required'),
-    body('identityProof').notEmpty().withMessage('Identity proof is required'),
-    checkErrors
-]
-
 // Verify KYC validation
 const validateKYC = [
     body('customerID').notEmpty().withMessage('Customer ID is required'),
@@ -60,4 +49,4 @@ const validateAssess = [
     checkErrors
 ]
 
-module.exports = { validateRegister, validateKYC, validatePolicy, validateClaim, validatePayout,validateAssess}
+module.exports = { validateKYC, validatePolicy, validateClaim, validatePayout, validateAssess }

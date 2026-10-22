@@ -63,6 +63,21 @@ describe('POST /claim/file', () => {
             'FileClaim', 'CUST1', 'POL-1', 'CLM-1234567890', 'Accident', '50000'
         )
     })
+    test('surfaces the real chaincode rejection reason when the claim exceeds coverage', async () => {
+        __mockContract.submitTransaction.mockRejectedValueOnce({
+            message: '10 ABORTED: failed to endorse transaction, see attached details for more info',
+            details: [{ message: 'chaincode response 500, claim amount exceeds policy coverage' }]
+        })
+
+        const res = await request(app)
+            .post('/claim/file')
+            .set('Cookie', [`token=${insurerToken}`])
+            .send(validBody)
+
+        expect(res.status).toBe(500)
+        expect(res.body.success).toBe(false)
+        expect(res.body.error).toBe('claim amount exceeds policy coverage')
+    })
 })
 
 describe('POST /claim/payout', () => {
@@ -94,6 +109,21 @@ describe('POST /claim/payout', () => {
         expect(__mockContract.submitTransaction).toHaveBeenCalledWith('ProcessPayout', 'CLM-1', '50000')
         expect(Claim.findOneAndUpdate).toHaveBeenCalledWith({ claimID: 'CLM-1' }, { status: 'PAID', payoutAmount: '50000' })
     })
+    
+    test('surfaces the real chaincode rejection reason when payout exceeds claim amount', async () => {
+        __mockContract.submitTransaction.mockRejectedValueOnce({
+            message: '10 ABORTED: failed to endorse transaction, see attached details for more info',
+            details: [{ message: 'chaincode response 500, payout amount exceeds claim amount' }]
+        })
+
+        const res = await request(app)
+            .post('/claim/payout')
+            .set('Cookie', [`token=${payoutToken}`])
+            .send({ claimID: 'CLM-1', payoutAmount: '50000' })
+
+        expect(res.status).toBe(500)
+        expect(res.body.error).toBe('payout amount exceeds claim amount')
+    })
 })
 
 describe('POST /claim/assess', () => {
@@ -105,17 +135,17 @@ describe('POST /claim/assess', () => {
         expect(res.status).toBe(403)
     })
 
-   test('succeeds and calls chaincode on org3', async () => {
-    const res = await request(app)
-        .post('/claim/assess')
-        .set('Cookie', [`token=${assessorToken}`])
-        .send({ claimID: 'CLM-1', decision: 'ASSESSED' })
+    test('succeeds and calls chaincode on org3', async () => {
+        const res = await request(app)
+            .post('/claim/assess')
+            .set('Cookie', [`token=${assessorToken}`])
+            .send({ claimID: 'CLM-1', decision: 'ASSESSED' })
 
-    expect(res.status).toBe(200)
-    expect(getContract).toHaveBeenCalledWith('org3')
-    expect(__mockContract.submitTransaction).toHaveBeenCalledWith('AssessClaim', 'CLM-1', 'ASSESSED')
-    expect(Claim.findOneAndUpdate).toHaveBeenCalledWith({ claimID: 'CLM-1' }, { status: 'ASSESSED' })
-})
+        expect(res.status).toBe(200)
+        expect(getContract).toHaveBeenCalledWith('org3')
+        expect(__mockContract.submitTransaction).toHaveBeenCalledWith('AssessClaim', 'CLM-1', 'ASSESSED')
+        expect(Claim.findOneAndUpdate).toHaveBeenCalledWith({ claimID: 'CLM-1' }, { status: 'ASSESSED' })
+    })
     test('rejects missing claimID', async () => {
         const res = await request(app)
             .post('/claim/assess')

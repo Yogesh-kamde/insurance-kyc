@@ -28,4 +28,4 @@ backend/backend.log
 tunnel.log
 
 # Local curl testing cookie jars
-backend/cookie_*.txt
+backend/*cookie*.txt

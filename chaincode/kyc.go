@@ -3,8 +3,11 @@ package main
 import (
 	"fmt"
 	"encoding/json" 
-	"time"                                                      
-    "github.com/hyperledger/fabric-contract-api-go/contractapi" 
+	"time"
+    "strconv"                                                      
+    "github.com/hyperledger/fabric-contract-api-go/contractapi"
+    "crypto/sha256"
+    "encoding/hex" 
 )
 type SmartContract struct {
     contractapi.Contract
@@ -17,16 +20,22 @@ type Policy struct{
     Status string `json:"status"`
     IssueAt string `json:"issueAt"`
 }
+// Public — written to the shared ledger, visible to all orgs
+type Customer struct {
+    CustomerID   string `json:"customerID"`
+    KYCStatus    string `json:"kycStatus"`
+    RegisteredAt string `json:"registeredAt"`
+    PIIHash      string `json:"piiHash"` // SHA-256 of the private record, proves integrity
+}
 
-type Customer struct{
-	CustomerID string `json:"customerID"`
-	FullName string   `json:"fullName"`
-	Contact  string `json:"contact"`
-	Address string `json:"address"`
-	Income string `json:"income"`
-	IdentityProof string `json:"identityProof"`
-	KYCStatus string `json:"kycStatus"` 
-	RegisteredAt string `json:"registeredAt"`
+// Private — written only to the customerPII collection, replicated only to Org1/Org2
+type CustomerPrivateDetails struct {
+    CustomerID    string `json:"customerID"`
+    FullName      string `json:"fullName"`
+    Contact       string `json:"contact"`
+    Address       string `json:"address"`
+    Income        string `json:"income"`
+    IdentityProof string `json:"identityProof"`
 }
 type Claim struct{
     ClaimID      string `json:"claimID"`
@@ -39,39 +48,60 @@ type Claim struct{
     FiledAt      string `json:"filedAt"`
     AssessedAt   string `json:"assessedAt"`
 }
-func (s *SmartContract) RegisterCustomer(ctx contractapi.TransactionContextInterface, customerID string, fullName string, contact string, address string, income string, identityProof string) error {
-existingData, err := ctx.GetStub().GetState(customerID)
-if err != nil {
-    return fmt.Errorf("failed to read from ledger: %v", err)
-}
-if existingData != nil {
-    return fmt.Errorf("user already exists")
-}
-//deterministic — same timestamp across all peers
-txTimestamp, err := ctx.GetStub().GetTxTimestamp()
-if err != nil {
-    return fmt.Errorf("failed to get timestamp: %v", err)
-}
-customer := Customer{
-    CustomerID:    customerID,
-    FullName:      fullName,
-    Contact:       contact,
-	Address:       address,
-	Income:        income,
-	IdentityProof: identityProof,
-    KYCStatus:    "PENDING",
-    RegisteredAt: time.Unix(txTimestamp.Seconds, int64(txTimestamp.Nanos)).UTC().Format("2006-01-02 15:04:05"),
-}
-
-bytes,err := json.Marshal(customer)
+func (s *SmartContract) RegisterCustomer(ctx contractapi.TransactionContextInterface, customerID string) error {
+    transientMap, err := ctx.GetStub().GetTransient()
     if err != nil {
-    return fmt.Errorf("failed to marshal customer: %v", err)
-}
- err = ctx.GetStub().PutState(customerID, bytes)
-   if err != nil {           
-    return fmt.Errorf("failed to save customer: %v", err)  
-}
-   return nil  
+        return fmt.Errorf("failed to get transient data: %v", err)
+    }
+
+    piiBytes, ok := transientMap["customer_pii"]
+    if !ok {
+        return fmt.Errorf("customer_pii not found in transient data")
+    }
+
+    var pii CustomerPrivateDetails
+    if err := json.Unmarshal(piiBytes, &pii); err != nil {
+        return fmt.Errorf("failed to unmarshal private data: %v", err)
+    }
+    pii.CustomerID = customerID
+
+    existingData, err := ctx.GetStub().GetState(customerID)
+    if err != nil {
+        return fmt.Errorf("failed to read from ledger: %v", err)
+    }
+    if existingData != nil {
+        return fmt.Errorf("customer already exists")
+    }
+
+    // Write the real PII only into the private collection
+    piiJSON, err := json.Marshal(pii)
+    if err != nil {
+        return fmt.Errorf("failed to marshal private data: %v", err)
+    }
+    if err := ctx.GetStub().PutPrivateData("customerPII", customerID, piiJSON); err != nil {
+        return fmt.Errorf("failed to write private data: %v", err)
+    }
+
+    // Hash of the private record goes on the public ledger — proves integrity without exposing content
+    hash := sha256.Sum256(piiJSON)
+
+    txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+    if err != nil {
+        return fmt.Errorf("failed to get timestamp: %v", err)
+    }
+
+    customer := Customer{
+        CustomerID:   customerID,
+        KYCStatus:    "PENDING",
+        RegisteredAt: time.Unix(txTimestamp.Seconds, 0).String(),
+        PIIHash:      hex.EncodeToString(hash[:]),
+    }
+
+    customerJSON, err := json.Marshal(customer)
+    if err != nil {
+        return fmt.Errorf("failed to marshal customer: %v", err)
+    }
+    return ctx.GetStub().PutState(customerID, customerJSON)
 }
 func (s *SmartContract) VerifyKYC(ctx contractapi.TransactionContextInterface, customerID string, decision string) error{
 existingData, err := ctx.GetStub().GetState(customerID)
@@ -108,6 +138,13 @@ func (s *SmartContract) GetCustomer(ctx contractapi.TransactionContextInterface,
     return string(existingData),nil
 }
 func (s *SmartContract) IssuePolicy(ctx contractapi.TransactionContextInterface, policyId string ,policyType string, customerID string,coverageAmount string) error{
+    coverage, err := strconv.ParseFloat(coverageAmount, 64)
+    if err != nil {
+        return fmt.Errorf("invalid coverage amount: %v", err)
+    }
+    if coverage <= 0 {
+        return fmt.Errorf("coverage amount must be greater than zero")
+    }
     existingData,err := ctx.GetStub().GetState(customerID)
     if err != nil{
         return fmt.Errorf("failed to read from ledger:%v",err)
@@ -163,6 +200,14 @@ func (s *SmartContract) GetPolicy(ctx contractapi.TransactionContextInterface, c
     return string(policyData),nil
 }
 func (s *SmartContract) FileClaim(ctx contractapi.TransactionContextInterface,customerID string,policyId string,claimID string,reason string,claimAmount string) error{
+    claimAmt, err := strconv.ParseFloat(claimAmount, 64)
+    if err != nil {
+        return fmt.Errorf("invalid claim amount: %v", err)
+    }
+    if claimAmt <= 0 {
+        return fmt.Errorf("claim amount must be greater than zero")
+    }
+
     policyData,err := ctx.GetStub().GetState(policyId)
     if err != nil{
         return fmt.Errorf("failed to read from ledger%v",err)
@@ -181,6 +226,14 @@ func (s *SmartContract) FileClaim(ctx contractapi.TransactionContextInterface,cu
     }
     if policy.CustomerID != customerID {
         return fmt.Errorf("policy does not belong to this customer")
+    }
+
+    coverage, err := strconv.ParseFloat(policy.CoverageAmount, 64)
+    if err != nil {
+        return fmt.Errorf("invalid coverage amount on policy: %v", err)
+    }
+    if claimAmt > coverage {
+        return fmt.Errorf("claim amount exceeds policy coverage")
     }
 
     //check claim
@@ -216,6 +269,14 @@ if err != nil {
      return nil
 }
 func (s *SmartContract) ProcessPayout(ctx contractapi.TransactionContextInterface,claimID string,payoutAmount string)error{
+    payout, err := strconv.ParseFloat(payoutAmount, 64)
+    if err != nil {
+        return fmt.Errorf("invalid payout amount: %v", err)
+    }
+    if payout <= 0 {
+        return fmt.Errorf("payout amount must be greater than zero")
+    }
+
     claimData,err := ctx.GetStub().GetState(claimID)
     if err != nil{
         return fmt.Errorf("failed to read from ledger%v",err)
@@ -232,6 +293,15 @@ func (s *SmartContract) ProcessPayout(ctx contractapi.TransactionContextInterfac
     if claim.Status != "ASSESSED" {
         return fmt.Errorf("claim is not approved for payout")
     }
+
+    claimAmt, err := strconv.ParseFloat(claim.ClaimAmount, 64)
+    if err != nil {
+        return fmt.Errorf("invalid claim amount on claim: %v", err)
+    }
+    if payout > claimAmt {
+        return fmt.Errorf("payout amount exceeds claim amount")
+    }
+
     claim.Status = "PAID" 
     claim.PayoutAmount = payoutAmount
     
@@ -278,6 +348,16 @@ if err != nil {
         return fmt.Errorf("failed to save policy:%v",err)
      }
      return nil
+}
+func (s *SmartContract) GetCustomerPrivateDetails(ctx contractapi.TransactionContextInterface, customerID string) (string, error) {
+    piiBytes, err := ctx.GetStub().GetPrivateData("customerPII", customerID)
+    if err != nil {
+        return "", fmt.Errorf("failed to read private data: %v", err)
+    }
+    if piiBytes == nil {
+        return "", fmt.Errorf("no private data found for %s", customerID)
+    }
+    return string(piiBytes), nil
 }
 func main() {
     chaincode, err := contractapi.NewChaincode(&SmartContract{})

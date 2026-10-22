@@ -5,8 +5,8 @@ export FABRIC_CFG_PATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/config
 
 ORDERER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt
 CHANNEL_NAME=insurancechannel
-CC_VERSION=2.0
-CC_SEQUENCE=2
+CC_VERSION=2.2
+CC_SEQUENCE=4
 
 setOrg1() {
     export CORE_PEER_LOCALMSPID=Org1MSP
@@ -38,15 +38,15 @@ peer lifecycle chaincode package kyc.tar.gz \
 
 echo "📥 Installing on Org1..."
 setOrg1
-peer lifecycle chaincode install kyc.tar.gz
+peer lifecycle chaincode install kyc.tar.gz || true
 
 echo "📥 Installing on Org2..."
 setOrg2
-peer lifecycle chaincode install kyc.tar.gz
+peer lifecycle chaincode install kyc.tar.gz || true
 
 echo "📥 Installing on Org3..."
 setOrg3
-peer lifecycle chaincode install kyc.tar.gz
+peer lifecycle chaincode install kyc.tar.gz || true
 
 setOrg1
 CC_PACKAGE_ID=$(peer lifecycle chaincode queryinstalled | grep "kyc_${CC_VERSION}" | awk '{print $3}' | tr -d ',')
@@ -61,7 +61,8 @@ peer lifecycle chaincode approveformyorg \
     --name kyc --version $CC_VERSION \
     --package-id $CC_PACKAGE_ID \
     --sequence $CC_SEQUENCE --tls \
-    --cafile $ORDERER_CA
+    --cafile $ORDERER_CA \
+    --collections-config ./collections_config.json
 
 echo "✅ Approving for Org2..."
 setOrg2
@@ -72,7 +73,8 @@ peer lifecycle chaincode approveformyorg \
     --name kyc --version $CC_VERSION \
     --package-id $CC_PACKAGE_ID \
     --sequence $CC_SEQUENCE --tls \
-    --cafile $ORDERER_CA
+    --cafile $ORDERER_CA \
+    --collections-config ./collections_config.json
 
 echo "✅ Approving for Org3..."
 setOrg3
@@ -83,7 +85,8 @@ peer lifecycle chaincode approveformyorg \
     --name kyc --version $CC_VERSION \
     --package-id $CC_PACKAGE_ID \
     --sequence $CC_SEQUENCE --tls \
-    --cafile $ORDERER_CA
+    --cafile $ORDERER_CA \
+    --collections-config ./collections_config.json
 
 echo "🔍 Checking commit readiness..."
 setOrg1
@@ -91,7 +94,8 @@ peer lifecycle chaincode checkcommitreadiness \
     --channelID $CHANNEL_NAME \
     --name kyc --version $CC_VERSION \
     --sequence $CC_SEQUENCE --tls \
-    --cafile $ORDERER_CA --output json
+    --cafile $ORDERER_CA --output json \
+    --collections-config ./collections_config.json
 
 echo "🔒 Committing chaincode..."
 setOrg1
@@ -101,6 +105,7 @@ peer lifecycle chaincode commit \
     --channelID $CHANNEL_NAME \
     --name kyc --version $CC_VERSION --sequence $CC_SEQUENCE --tls \
     --cafile $ORDERER_CA \
+    --collections-config ./collections_config.json \
     --peerAddresses peer0.org1.example.com:7051 \
     --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt \
     --peerAddresses peer0.org2.example.com:9051 \
