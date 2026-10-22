@@ -18,6 +18,11 @@ Org3: Claims Assessor → AssessClaim
 MongoDB Atlas — off-chain storage, synced with ledger state
 
 
+### Privacy: Customer PII in a Private Data Collection
+
+Customer KYC details (full name, contact, address, income, identity proof) are **not** stored in plaintext on the shared ledger. They're written to a Fabric private data collection (`customerPII`) scoped to Org1 (Insurer) and Org2 (Regulator) only — Org3 (Claims Assessor) never receives a copy, since it doesn't need PII to assess a claim.
+
+The public ledger record holds only `customerID`, `kycStatus`, `registeredAt`, and a SHA-256 hash of the private record (`piiHash`) — enough to prove the data wasn't tampered with, without exposing it to every org on the channel. PII is submitted via Fabric's transient data mechanism, so it never appears in transaction proposals, block history, or peer logs.
 ---
 
 ## 🔄 Workflow
@@ -43,6 +48,7 @@ Payout Officer processes → marks claim as PAID
 | Infra | Docker, Docker Compose |
 | Testing | Go testify, Jest, Supertest |
 | Deployment | nginx, Cloudflare Tunnel |
+| Privacy | Fabric private data collections (`customerPII`), SHA-256 integrity hashing |
 
 ---
 
@@ -50,14 +56,15 @@ Payout Officer processes → marks claim as PAID
 
 insurance-kyc/
 ├── chaincode/
-│   ├── kyc.go              # Smart contract (8 functions, 3 structs)
+│   ├── kyc.go              # Smart contract (public/private struct split, numeric validation)
 │   ├── kyc_test.go         # Go unit tests
 │   └── go.mod
 ├── backend/
 │   ├── app.js               # Express app (routes, middleware)
 │   ├── server.js            # Entry point (listen, Socket.IO, DB connect)
 │   ├── seed.js               # Test data seeder
-│   ├──__tests__/                # Jest/Supertest route tests
+│   ├── __tests__/            # Jest/Supertest route tests
+│   │   └── errorHelper.test.js   # NEW — unit tests for extractChaincodeError
 │   ├── middleware/
 │   │   ├── auth.js          # JWT + HttpOnly cookie auth
 │   │   ├── validate.js      # Input validation
@@ -67,7 +74,8 @@ insurance-kyc/
 │   │   └── auth.js          # register + login
 │   ├── utils/
 │   │   ├── fabric.js        # Fabric Gateway connection (configurable via .env)
-│   │   └── db.js            # MongoDB connection
+│   │   ├── db.js             # MongoDB connection
+│   │   └── errorHelper.js    # NEW — extracts real chaincode errors from Gateway SDK errors
 │   └── .env                  # not committed — see Setup
 ├── frontend/
 │   └── src/
@@ -82,6 +90,7 @@ insurance-kyc/
 │   ├── network.sh            # up / down / restart
 │   ├── configtx.yaml         # orgs, policies, anchor peers
 │   ├── docker-compose.yml    # 3 peers, orderer, 4 CAs, CLI
+│   ├── collections_config.json   # NEW — private data collection definition (customerPII)
 │   └── scripts/
 │       ├── upgradeCC.sh      # Chaincode version upgrades
 │       ├── registerEnroll.sh # crypto material generation
@@ -101,6 +110,7 @@ insurance-kyc/
 | `FileClaim` | Insurer | File a claim against a policy |
 | `AssessClaim` | Claims Assessor | Approve or reject a filed claim |
 | `ProcessPayout` | Payout Officer | Marks an assessed claim as paid |
+| `GetCustomerPrivateDetails` | Org1/Org2 only | Read a customer's actual PII from the private collection |
 
 Each write follows a standard 5-step pattern: Read → Unmarshal → Modify → Marshal → Write.
 
@@ -200,7 +210,8 @@ npm start
 | POST | `/claim/file` | File a claim (Insurer) |
 | POST | `/claim/assess` | Approve or reject a claim (Assessor) |
 | POST | `/claim/payout` | Process payout (Payout Officer) |
-| GET    | /health              | Health check (no auth) |
+| GET    |   `/health `  | Health check (no auth) |
+> `policy/issue`, `claim/file`, and `claim/payout` enforce business-rule validation at the chaincode level: amounts must be positive numbers, claims cannot exceed their policy's coverage, and payouts cannot exceed the claim amount.
 
 ---
 
@@ -239,16 +250,22 @@ Seed accounts only — change credentials before any real deployment.
 
 ## 📌 Status
 
-✅ **Complete** — 3-org network with per-org transaction routing (each role submits transactions under its own org's identity), chaincode deployed and committed, all 5 dashboards, JWT auth with rate-limited auth routes, MongoDB sync, WebSocket notifications, Go + Jest test suites, `/health` endpoint, live deployment via nginx + Cloudflare Tunnel.
+✅ **Complete** — 3-org network with per-org transaction routing (each role submits transactions under its own org's identity), chaincode deployed and committed (v2.2), all 5 dashboards (including policy and claim history on the customer dashboard), JWT auth with rate-limited auth routes, MongoDB sync, WebSocket notifications, Go + Jest test suites, `/health` endpoint, Fabric private data collection for customer KYC data, business-rule validation on claim/policy amounts, live deployment via nginx + Cloudflare Tunnel.
+
+⏳ **In progress** — persistent (non-ephemeral) hosting.
+
+## 🧪 Testing
+
+- **Chaincode**: 31 Go unit tests (`chaincode/kyc_test.go`) covering every smart contract function's success and failure branches — auth checks, state transitions, duplicate/missing-record handling, private-data read/write, and numeric/business-rule validation on policy, claim, and payout amounts — using `shimtest.MockStub`.
+```bash
   cd chaincode
   go test ./... -v
 ```
-- **Backend**: 26 Jest/Supertest tests (`backend/__tests__/`) covering auth, validation, and success paths for every write route, plus rate-limiting enforcement on `/auth/login`, with the Fabric Gateway and MongoDB fully mocked so tests run without the network or a database.
+- **Backend**: 32 Jest/Supertest tests (`backend/__tests__/`) covering every write route's auth, validation, and success path, rate-limiting enforcement on `/auth/login`, and the chaincode-error-extraction layer that surfaces real rejection reasons (e.g. "claim amount exceeds policy coverage") instead of generic gateway errors — with the Fabric Gateway and MongoDB fully mocked so tests run without the network or a database.
 ```bash
   cd backend
   npm test
 ```
-
 ## 🌐 Deployment
 
 The full stack (Fabric network, backend, MongoDB, and the React build) runs locally and is exposed publicly through nginx (serving the frontend build and reverse-proxying API routes to the backend on one origin) and a Cloudflare Tunnel.
